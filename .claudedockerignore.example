@@ -1,0 +1,31 @@
+# .claudedockerignore - exclude files/directories from the container workspace
+# Syntax follows gitignore rules:
+#   - Blank lines and lines starting with # are ignored
+#   - Trailing slash matches directories only (e.g. dist/)
+#   - Leading / anchors to project root (e.g. /.env matches only root .env)
+#   - Patterns without / match at any depth (e.g. node_modules matches everywhere)
+#   - Glob wildcards * and ? are supported (e.g. *.log)
+#   - Leading **/ is stripped (e.g. **/cache is treated as cache)
+#   - Negation (!) is not supported
+
+# --- Security: keep secrets out of the container ---
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
+
+# --- Performance: skip large generated directories ---
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+.next/
+.nuxt/
+
+# --- Nested example: ignore a specific subdirectory ---
+# src/generated/
+# data/raw/

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 trap 'echo "$0: line $LINENO: $BASH_COMMAND: exitcode $?"' ERR
+
+# Cleanup temp shadow mount paths on exit
+TEMP_SHADOW_PATHS=()
+_cleanup_shadow_mounts() {
+    local _p
+    for _p in "${TEMP_SHADOW_PATHS[@]:-}"; do
+        rm -rf "$_p" 2>/dev/null || true
+    done
+}
+trap '_cleanup_shadow_mounts' EXIT
 # ABOUTME: Wrapper script to run Claude Code in Docker container
 # ABOUTME: Handles project mounting, persistent Claude config, and environment variables
 
@@ -277,6 +287,85 @@ else
     echo "No additional conda directories configured"
 fi
 
+# Process .claudedockerignore - build shadow mounts to hide excluded paths
+# Shadow mounts overlay temp empty files/dirs on top of the ignored paths inside
+# the container, while the full project is still bind-mounted for bidirectional sync.
+SHADOW_MOUNTS=""
+IGNORE_FILE="$CURRENT_DIR/.claudedockerignore"
+
+_add_shadow_mount() {
+    local match="$1"
+    local rel_path="${match#$CURRENT_DIR/}"
+    local container_path="/workspace/$rel_path"
+    local temp_path
+    if [ -d "$match" ]; then
+        temp_path=$(mktemp -d)
+        TEMP_SHADOW_PATHS+=("$temp_path")
+        SHADOW_MOUNTS="$SHADOW_MOUNTS -v $temp_path:$container_path"
+        echo "  ✗ Excluding dir:  $rel_path/"
+        IGNORED_COUNT=$((IGNORED_COUNT + 1))
+    elif [ -f "$match" ]; then
+        temp_path=$(mktemp)
+        TEMP_SHADOW_PATHS+=("$temp_path")
+        SHADOW_MOUNTS="$SHADOW_MOUNTS -v $temp_path:$container_path"
+        echo "  ✗ Excluding file: $rel_path"
+        IGNORED_COUNT=$((IGNORED_COUNT + 1))
+    fi
+}
+
+if [ -f "$IGNORE_FILE" ]; then
+    echo "📋 Found .claudedockerignore - applying ignore patterns..."
+    IGNORED_COUNT=0
+
+    while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+        # Normalize line endings and skip blank lines, comments, negations
+        pattern="${pattern%$'\r'}"
+        [[ -z "$pattern" || "$pattern" == \#* ]] && continue
+        [[ "$pattern" == \!* ]] && { echo "  ⚠ Negation not supported, skipping: $pattern"; continue; }
+
+        # Track if pattern is directory-only (trailing slash)
+        dir_only=false
+        [[ "$pattern" == */ ]] && dir_only=true
+
+        # Strip trailing slash and leading **/ prefix
+        pattern="${pattern%/}"
+        pattern="${pattern#\*\*/}"
+        [[ -z "$pattern" ]] && continue
+
+        if [[ "$pattern" == /* || "$pattern" == */* ]]; then
+            # Pattern has a directory component: expand relative to project root
+            rel_pattern="${pattern#/}"  # strip leading slash if root-relative
+            if [[ "$rel_pattern" == *[\*\?\[]* ]]; then
+                # Contains glob characters: expand with nullglob + globstar
+                shopt -s nullglob globstar
+                for match in "$CURRENT_DIR/"$rel_pattern; do
+                    if $dir_only && [ ! -d "$match" ]; then continue; fi
+                    _add_shadow_mount "$match"
+                done
+                shopt -u nullglob globstar
+            else
+                # Literal path: single existence check
+                full_path="$CURRENT_DIR/$rel_pattern"
+                if [ -e "$full_path" ]; then
+                    if $dir_only && [ ! -d "$full_path" ]; then continue; fi
+                    _add_shadow_mount "$full_path"
+                fi
+            fi
+        else
+            # Simple name or glob: find matching items at any depth
+            find_type_args=()
+            $dir_only && find_type_args=(-type d)
+            while IFS= read -r match; do
+                [[ -z "$match" ]] && continue
+                _add_shadow_mount "$match"
+            done < <(find "$CURRENT_DIR" -mindepth 1 "${find_type_args[@]}" -name "$pattern" 2>/dev/null || true)
+        fi
+    done < "$IGNORE_FILE"
+
+    echo "  → $IGNORED_COUNT path(s) excluded from workspace"
+    echo ""
+fi
+
 # Run Claude Code in Docker
 echo "Starting Claude Code in Docker..."
 "$DOCKER" run -it --rm \
@@ -286,6 +375,7 @@ echo "Starting Claude Code in Docker..."
     -v "$SSH_DIR:/home/claude-user/.ssh:rw" \
     $MOUNT_ARGS \
     $ENV_ARGS \
+    $SHADOW_MOUNTS \
     -e CLAUDE_CONTINUE_FLAG="$CONTINUE_FLAG" \
     --workdir /workspace \
     --name "claude-docker-$(basename "$CURRENT_DIR")-$$" \
