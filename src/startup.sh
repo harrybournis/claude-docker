@@ -71,6 +71,11 @@ fi
 #     done < <(sed 's://.*$::g' "$HOME/.claude/settings.json" | jq -r '.env // {} | to_entries | .[] | "\(.key)=\(.value)"' 2>/dev/null)
 # fi
 
-# Start Claude Code with permissions bypass
+# Start Claude Code
 echo "Starting Claude Code..."
-exec claude $CLAUDE_CONTINUE_FLAG --dangerously-skip-permissions "$@"
+SKIP_PERMISSIONS_FLAG=""
+if [ "${CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ]; then
+    echo "⚠️  Running with --dangerously-skip-permissions"
+    SKIP_PERMISSIONS_FLAG="--dangerously-skip-permissions"
+fi
+exec claude $CLAUDE_CONTINUE_FLAG $SKIP_PERMISSIONS_FLAG "$@"

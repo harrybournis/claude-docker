@@ -27,6 +27,7 @@ CONTINUE_FLAG=""
 MEMORY_LIMIT=""
 GPU_ACCESS=""
 CC_VERSION=""
+SKIP_PERMISSIONS=false
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -45,6 +46,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --continue)
             CONTINUE_FLAG="--continue"
+            shift
+            ;;
+        --skip-permissions)
+            SKIP_PERMISSIONS=true
             shift
             ;;
         --memory)
@@ -377,6 +382,7 @@ echo "Starting Claude Code in Docker..."
     $ENV_ARGS \
     $SHADOW_MOUNTS \
     -e CLAUDE_CONTINUE_FLAG="$CONTINUE_FLAG" \
+    -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS="$SKIP_PERMISSIONS" \
     --workdir /workspace \
     --name "claude-docker-$(basename "$CURRENT_DIR")-$$" \
     claude-docker:latest ${ARGS[@]+"${ARGS[@]}"}
