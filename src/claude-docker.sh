@@ -2,15 +2,6 @@
 set -euo pipefail
 trap 'echo "$0: line $LINENO: $BASH_COMMAND: exitcode $?"' ERR
 
-# Cleanup temp shadow mount paths on exit
-TEMP_SHADOW_PATHS=()
-_cleanup_shadow_mounts() {
-    local _p
-    for _p in "${TEMP_SHADOW_PATHS[@]:-}"; do
-        rm -rf "$_p" 2>/dev/null || true
-    done
-}
-trap '_cleanup_shadow_mounts' EXIT
 # ABOUTME: Wrapper script to run Claude Code in Docker container
 # ABOUTME: Handles project mounting, persistent Claude config, and environment variables
 
@@ -28,6 +19,7 @@ MEMORY_LIMIT=""
 GPU_ACCESS=""
 CC_VERSION=""
 SKIP_PERMISSIONS=false
+SYNC_INTERVAL="5"
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -51,6 +43,10 @@ while [[ $# -gt 0 ]]; do
         --skip-permissions)
             SKIP_PERMISSIONS=true
             shift
+            ;;
+        --sync-interval)
+            SYNC_INTERVAL="$2"
+            shift 2
             ;;
         --memory)
             MEMORY_LIMIT="$2"
@@ -133,11 +129,11 @@ if [ "$NEED_REBUILD" = true ]; then
     if [ -n "$HOST_HOME" ] && [ -f "$HOST_HOME/.claude.json" ]; then
         cp "$HOST_HOME/.claude.json" "$PROJECT_ROOT/.claude.json"
     fi
-    
+
     # Get git config from host
     GIT_USER_NAME=$(git config --global --get user.name 2>/dev/null || echo "")
     GIT_USER_EMAIL=$(git config --global --get user.email 2>/dev/null || echo "")
-    
+
     # Build docker command with conditional system packages and git config
     BUILD_ARGS="--build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)"
     if [ -n "${GIT_USER_NAME:-}" ] && [ -n "${GIT_USER_EMAIL:-}" ]; then
@@ -153,7 +149,7 @@ if [ "$NEED_REBUILD" = true ]; then
     fi
 
     eval "'$DOCKER' build $NO_CACHE $BUILD_ARGS -t claude-docker:latest \"$PROJECT_ROOT\""
-    
+
     # Clean up copied auth files
     rm -f "$PROJECT_ROOT/.claude.json"
 fi
@@ -198,7 +194,7 @@ if [ ! -f "$SSH_KEY_PATH" ] || [ ! -f "$SSH_PUB_KEY_PATH" ]; then
     echo ""
 else
     echo "✓ SSH keys found for git operations"
-    
+
     # Create SSH config if it doesn't exist
     SSH_CONFIG_PATH="$SSH_DIR/config"
     if [ ! -f "$SSH_CONFIG_PATH" ]; then
@@ -292,97 +288,26 @@ else
     echo "No additional conda directories configured"
 fi
 
-# Process .claudedockerignore - build shadow mounts to hide excluded paths
-# Shadow mounts overlay temp empty files/dirs on top of the ignored paths inside
-# the container, while the full project is still bind-mounted for bidirectional sync.
-SHADOW_MOUNTS=""
+# Log ignore file status
 IGNORE_FILE="$CURRENT_DIR/.claudedockerignore"
-
-_add_shadow_mount() {
-    local match="$1"
-    local rel_path="${match#$CURRENT_DIR/}"
-    local container_path="/workspace/$rel_path"
-    local temp_path
-    if [ -d "$match" ]; then
-        temp_path=$(mktemp -d)
-        TEMP_SHADOW_PATHS+=("$temp_path")
-        SHADOW_MOUNTS="$SHADOW_MOUNTS -v $temp_path:$container_path"
-        echo "  ✗ Excluding dir:  $rel_path/"
-        IGNORED_COUNT=$((IGNORED_COUNT + 1))
-    elif [ -f "$match" ]; then
-        temp_path=$(mktemp)
-        TEMP_SHADOW_PATHS+=("$temp_path")
-        SHADOW_MOUNTS="$SHADOW_MOUNTS -v $temp_path:$container_path"
-        echo "  ✗ Excluding file: $rel_path"
-        IGNORED_COUNT=$((IGNORED_COUNT + 1))
-    fi
-}
-
 if [ -f "$IGNORE_FILE" ]; then
-    echo "📋 Found .claudedockerignore - applying ignore patterns..."
-    IGNORED_COUNT=0
-
-    while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-        # Normalize line endings and skip blank lines, comments, negations
-        pattern="${pattern%$'\r'}"
-        [[ -z "$pattern" || "$pattern" == \#* ]] && continue
-        [[ "$pattern" == \!* ]] && { echo "  ⚠ Negation not supported, skipping: $pattern"; continue; }
-
-        # Track if pattern is directory-only (trailing slash)
-        dir_only=false
-        [[ "$pattern" == */ ]] && dir_only=true
-
-        # Strip trailing slash and leading **/ prefix
-        pattern="${pattern%/}"
-        pattern="${pattern#\*\*/}"
-        [[ -z "$pattern" ]] && continue
-
-        if [[ "$pattern" == /* || "$pattern" == */* ]]; then
-            # Pattern has a directory component: expand relative to project root
-            rel_pattern="${pattern#/}"  # strip leading slash if root-relative
-            if [[ "$rel_pattern" == *[\*\?\[]* ]]; then
-                # Contains glob characters: expand with nullglob + globstar
-                shopt -s nullglob globstar
-                for match in "$CURRENT_DIR/"$rel_pattern; do
-                    if $dir_only && [ ! -d "$match" ]; then continue; fi
-                    _add_shadow_mount "$match"
-                done
-                shopt -u nullglob globstar
-            else
-                # Literal path: single existence check
-                full_path="$CURRENT_DIR/$rel_pattern"
-                if [ -e "$full_path" ]; then
-                    if $dir_only && [ ! -d "$full_path" ]; then continue; fi
-                    _add_shadow_mount "$full_path"
-                fi
-            fi
-        else
-            # Simple name or glob: find matching items at any depth
-            find_type_args=()
-            $dir_only && find_type_args=(-type d)
-            while IFS= read -r match; do
-                [[ -z "$match" ]] && continue
-                _add_shadow_mount "$match"
-            done < <(find "$CURRENT_DIR" -mindepth 1 "${find_type_args[@]}" -name "$pattern" 2>/dev/null || true)
-        fi
-    done < "$IGNORE_FILE"
-
-    echo "  → $IGNORED_COUNT path(s) excluded from workspace"
-    echo ""
+    echo "📋 Found .claudedockerignore - rsync will exclude listed paths"
+else
+    echo "No .claudedockerignore found - all files will be synced to container"
 fi
 
 # Run Claude Code in Docker
 echo "Starting Claude Code in Docker..."
 "$DOCKER" run -it --rm \
     $DOCKER_OPTS \
-    -v "$CURRENT_DIR:/workspace" \
+    -v "$CURRENT_DIR:/host-workspace:rw" \
     -v "$CLAUDE_HOME_DIR:/home/claude-user/.claude:rw" \
     -v "$SSH_DIR:/home/claude-user/.ssh:rw" \
     $MOUNT_ARGS \
     $ENV_ARGS \
-    $SHADOW_MOUNTS \
     -e CLAUDE_CONTINUE_FLAG="$CONTINUE_FLAG" \
     -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS="$SKIP_PERMISSIONS" \
+    -e SYNC_INTERVAL="$SYNC_INTERVAL" \
     --workdir /workspace \
     --name "claude-docker-$(basename "$CURRENT_DIR")-$$" \
     claude-docker:latest ${ARGS[@]+"${ARGS[@]}"}
