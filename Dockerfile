@@ -1,5 +1,5 @@
-# ABOUTME: Docker image for Claude Code with Twilio MCP server
-# ABOUTME: Provides autonomous Claude Code environment with SMS notifications
+# ABOUTME: Docker image for Claude Code
+# ABOUTME: Provides autonomous Claude Code environment
 
 FROM node:20.18.1-slim
 
@@ -69,25 +69,9 @@ RUN chmod +x /app/startup.sh
 # Copy .claude directory for runtime use
 COPY .claude /app/.claude
 
-# Copy .env file during build to bake credentials into the image
-# This enables one-time setup - no need for .env in project directories
-COPY .env /app/.env
-
-# Copy CLAUDE.md template directly to final location
-COPY .claude/CLAUDE.md /home/claude-user/.claude/CLAUDE.md
-
-# Copy Claude authentication files from host
-# Note: These must exist - host must have authenticated Claude Code first
-COPY .claude.json /tmp/.claude.json
-
-# Copy MCP server configuration files (as root)
-COPY mcp-servers.txt /app/
-COPY install-mcp-servers.sh /app/
-RUN chmod +x /app/install-mcp-servers.sh
-
-# Move auth files to proper location before switching user
-RUN cp /tmp/.claude.json /home/claude-user/.claude.json && \
-    rm -f /tmp/.claude.json
+# Copy MCP server installation script (as root)
+COPY mcp-servers.sh /app/
+RUN chmod +x /app/mcp-servers.sh
 
 # Set proper ownership for everything (including /workspace for rsync)
 RUN mkdir -p /workspace && chown -R claude-user /app /home/claude-user /workspace
@@ -106,20 +90,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/claude-user/.local/bin:${PATH}"
 
 # Install MCP servers from configuration file
-RUN /app/install-mcp-servers.sh
-
-# Configure git user during build using host git config passed as build args
-ARG GIT_USER_NAME=""
-ARG GIT_USER_EMAIL=""
-RUN if [ -n "$GIT_USER_NAME" ] && [ -n "$GIT_USER_EMAIL" ]; then \
-        echo "Configuring git user from host: $GIT_USER_NAME <$GIT_USER_EMAIL>" && \
-        git config --global user.name "$GIT_USER_NAME" && \
-        git config --global user.email "$GIT_USER_EMAIL" && \
-        echo "Git configuration complete"; \
-    else \
-        echo "Warning: No git user configured on host system"; \
-        echo "Run 'git config --global user.name \"Your Name\"' and 'git config --global user.email \"you@example.com\"' on host first"; \
-    fi
+RUN /app/mcp-servers.sh
 
 # Set working directory to mounted volume
 WORKDIR /workspace

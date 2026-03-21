@@ -3,7 +3,7 @@ set -euo pipefail
 trap 'echo "$0: line $LINENO: $BASH_COMMAND: exitcode $?"' ERR
 
 # ABOUTME: Wrapper script to run Claude Code in Docker container
-# ABOUTME: Handles project mounting, persistent Claude config, and environment variables
+# ABOUTME: Handles project mounting and persistent Claude config
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -14,11 +14,9 @@ source "$SCRIPT_DIR/lib-common.sh"
 DOCKER="${DOCKER:-docker}"
 NO_CACHE=""
 FORCE_REBUILD=false
-CONTINUE_FLAG=""
 MEMORY_LIMIT=""
 GPU_ACCESS=""
 CC_VERSION=""
-SKIP_PERMISSIONS=false
 SYNC_INTERVAL="5"
 ARGS=()
 
@@ -37,11 +35,11 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --continue)
-            CONTINUE_FLAG="--continue"
+            ARGS+=("--continue")
             shift
             ;;
         --skip-permissions)
-            SKIP_PERMISSIONS=true
+            ARGS+=("--dangerously-skip-permissions")
             shift
             ;;
         --sync-interval)
@@ -73,27 +71,9 @@ resolve_claude_docker_dir
 
 # Get the absolute path of the current directory
 CURRENT_DIR=$(pwd)
-HOST_HOME="${HOME:-}"
-if [ -z "$HOST_HOME" ]; then
-    HOST_HOME="$(get_home_for_uid "$(id -u)" || true)"
-fi
 
 CLAUDE_HOME_DIR="$CLAUDE_DOCKER_DIR/claude-home"
 SSH_DIR="$CLAUDE_DOCKER_DIR/ssh"
-
-# Check if .env exists in claude-docker directory for building
-ENV_FILE="$PROJECT_ROOT/.env"
-if [ -f "$ENV_FILE" ]; then
-    echo "✓ Found .env file with credentials"
-    # Source .env to get configuration variables
-    set -a
-    source "$ENV_FILE" 2>/dev/null || true
-    set +a
-else
-    echo "⚠️  No .env file found at $ENV_FILE"
-    echo "   Twilio MCP features will be unavailable."
-    echo "   To enable: copy .env.example to .env in the claude-docker repository and add your credentials"
-fi
 
 # Use environment variables as defaults if command line args not provided
 if [ -z "${MEMORY_LIMIT:-}" ] && [ -n "${DOCKER_MEMORY_LIMIT:-}" ]; then
@@ -125,33 +105,19 @@ if [ -n "${NO_CACHE:-}" ] && [ "$NEED_REBUILD" = false ]; then
 fi
 
 if [ "$NEED_REBUILD" = true ]; then
-    # Copy authentication files to build context
-    if [ -n "$HOST_HOME" ] && [ -f "$HOST_HOME/.claude.json" ]; then
-        cp "$HOST_HOME/.claude.json" "$PROJECT_ROOT/.claude.json"
-    fi
-
-    # Get git config from host
-    GIT_USER_NAME=$(git config --global --get user.name 2>/dev/null || echo "")
-    GIT_USER_EMAIL=$(git config --global --get user.email 2>/dev/null || echo "")
-
-    # Build docker command with conditional system packages and git config
-    BUILD_ARGS="--build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)"
-    if [ -n "${GIT_USER_NAME:-}" ] && [ -n "${GIT_USER_EMAIL:-}" ]; then
-        BUILD_ARGS="$BUILD_ARGS --build-arg GIT_USER_NAME=\"$GIT_USER_NAME\" --build-arg GIT_USER_EMAIL=\"$GIT_USER_EMAIL\""
-    fi
+    BUILD_CMD=("$DOCKER" build)
+    [ -n "$NO_CACHE" ] && BUILD_CMD+=("--no-cache")
+    BUILD_CMD+=(--build-arg "USER_UID=$(id -u)" --build-arg "USER_GID=$(id -g)")
     if [ -n "${SYSTEM_PACKAGES:-}" ]; then
         echo "✓ Building with additional system packages: $SYSTEM_PACKAGES"
-        BUILD_ARGS="$BUILD_ARGS --build-arg SYSTEM_PACKAGES=\"$SYSTEM_PACKAGES\""
+        BUILD_CMD+=(--build-arg "SYSTEM_PACKAGES=$SYSTEM_PACKAGES")
     fi
     if [ -n "${CC_VERSION:-}" ]; then
         echo "✓ Building with Claude Code version: $CC_VERSION"
-        BUILD_ARGS="$BUILD_ARGS --build-arg CC_VERSION=\"$CC_VERSION\""
+        BUILD_CMD+=(--build-arg "CC_VERSION=$CC_VERSION")
     fi
-
-    eval "'$DOCKER' build $NO_CACHE $BUILD_ARGS -t claude-docker:latest \"$PROJECT_ROOT\""
-
-    # Clean up copied auth files
-    rm -f "$PROJECT_ROOT/.claude.json"
+    BUILD_CMD+=(-t claude-docker:latest "$PROJECT_ROOT")
+    "${BUILD_CMD[@]}"
 fi
 
 # Ensure the claude-home and ssh directories exist
@@ -159,9 +125,9 @@ mkdir -p "$CLAUDE_HOME_DIR"
 mkdir -p "$SSH_DIR"
 
 # Copy authentication files to persistent claude-home if they don't exist
-if [ -n "$HOST_HOME" ] && [ -f "$HOST_HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.credentials.json" ]; then
+if [ -n "${HOME:-}" ] && [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.credentials.json" ]; then
     echo "✓ Copying Claude authentication to persistent directory"
-    cp "$HOST_HOME/.claude/.credentials.json" "$CLAUDE_HOME_DIR/.credentials.json"
+    cp "$HOME/.claude/.credentials.json" "$CLAUDE_HOME_DIR/.credentials.json"
 fi
 
 # Log information about persistent Claude home directory
@@ -372,8 +338,6 @@ echo "Starting Claude Code in Docker..."
     -v "$SSH_DIR:/home/claude-user/.ssh:rw" \
     $MOUNT_ARGS \
     $ENV_ARGS \
-    -e CLAUDE_CONTINUE_FLAG="$CONTINUE_FLAG" \
-    -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS="$SKIP_PERMISSIONS" \
     --workdir /workspace \
     --name "$CLAUDE_CONTAINER" \
     claude-docker:latest ${ARGS[@]+"${ARGS[@]}"}

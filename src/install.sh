@@ -87,13 +87,6 @@ mkdir -p "$CLAUDE_HOME_DIR"
 echo "✓ Copying template Claude configuration to persistent directory"
 cp -r "$PROJECT_ROOT/.claude/." "$CLAUDE_HOME_DIR/"
 
-# Copy example env file if doesn't exist
-if [ ! -f "$PROJECT_ROOT/.env" ]; then
-    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
-    echo "⚠️  Created .env file at $PROJECT_ROOT/.env"
-    echo "   Please edit it with your API keys!"
-fi
-
 # Add alias to the detected shell RC file
 ALIAS_LINE="alias claude-docker='$PROJECT_ROOT/src/claude-docker.sh'"
 if [ ! -f "$TARGET_RC_FILE" ]; then
@@ -114,9 +107,6 @@ fi
 if [ "$EUID" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
     chown -R "$TARGET_UID:$TARGET_GID" "$CLAUDE_DOCKER_DIR"
     chown "$TARGET_UID:$TARGET_GID" "$TARGET_RC_FILE"
-    if [ -f "$PROJECT_ROOT/.env" ]; then
-        chown "$TARGET_UID:$TARGET_GID" "$PROJECT_ROOT/.env"
-    fi
 fi
 
 # Make scripts executable
@@ -176,7 +166,6 @@ echo ""
 echo "Installation complete! 🎉"
 echo ""
 echo "Next steps:"
-echo "1. (Optional) Edit $PROJECT_ROOT/.env with your API keys"
-echo "2. Run 'source $TARGET_RC_FILE' or start a new terminal"
-echo "3. Navigate to any project and run 'claude-docker' to start"
-echo "4. If no API key, Claude will prompt for interactive authentication"
+echo "1. Run 'source $TARGET_RC_FILE' or start a new terminal"
+echo "2. Navigate to any project and run 'claude-docker' to start"
+echo "3. If no API key, Claude will prompt for interactive authentication"
