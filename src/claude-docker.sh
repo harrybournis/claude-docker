@@ -299,10 +299,26 @@ else
 fi
 
 # Unique names for this session
-SESSION_ID="$(basename "$CURRENT_DIR")-$$"
+# PROJECT_KEY = basename + short hash of full path, stable across sessions for the same directory
+PROJECT_NAME="$(basename "$CURRENT_DIR")"
+PATH_HASH=$(echo "$CURRENT_DIR" | md5sum | cut -c1-8)
+PROJECT_KEY="${PROJECT_NAME}-${PATH_HASH}"
+SESSION_ID="$PROJECT_KEY-$$"
 VOLUME_NAME="claude-workspace-$SESSION_ID"
 SYNC_CONTAINER="claude-sync-$SESSION_ID"
 CLAUDE_CONTAINER="claude-docker-$SESSION_ID"
+
+# Clean up any leftover sync containers and volumes from crashed previous sessions
+LEFTOVER_CONTAINERS=$("$DOCKER" ps -aq --filter "name=claude-sync-$PROJECT_KEY" 2>/dev/null)
+if [ -n "$LEFTOVER_CONTAINERS" ]; then
+    echo "Cleaning up leftover sync containers from previous session..."
+    "$DOCKER" rm -f $LEFTOVER_CONTAINERS 2>/dev/null || true
+fi
+LEFTOVER_VOLUMES=$("$DOCKER" volume ls -q --filter "name=claude-workspace-$PROJECT_KEY" 2>/dev/null)
+if [ -n "$LEFTOVER_VOLUMES" ]; then
+    echo "Cleaning up leftover workspace volumes from previous session..."
+    "$DOCKER" volume rm $LEFTOVER_VOLUMES 2>/dev/null || true
+fi
 
 # Cleanup: final sync, stop sidecar, remove volume
 _cleanup() {
