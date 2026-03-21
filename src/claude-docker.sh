@@ -288,26 +288,76 @@ else
     echo "No additional conda directories configured"
 fi
 
-# Log ignore file status
+# Build rsync exclude flag from .claudedockerignore
 IGNORE_FILE="$CURRENT_DIR/.claudedockerignore"
+RSYNC_EXCLUDES=""
 if [ -f "$IGNORE_FILE" ]; then
-    echo "📋 Found .claudedockerignore - rsync will exclude listed paths"
+    RSYNC_EXCLUDES="--exclude-from=/host-workspace/.claudedockerignore"
+    echo "📋 Found .claudedockerignore - ignored paths will be excluded from sync"
 else
     echo "No .claudedockerignore found - all files will be synced to container"
 fi
 
-# Run Claude Code in Docker
+# Unique names for this session
+SESSION_ID="$(basename "$CURRENT_DIR")-$$"
+VOLUME_NAME="claude-workspace-$SESSION_ID"
+SYNC_CONTAINER="claude-sync-$SESSION_ID"
+CLAUDE_CONTAINER="claude-docker-$SESSION_ID"
+
+# Cleanup: final sync, stop sidecar, remove volume
+_cleanup() {
+    echo ""
+    echo "Performing final sync to host..."
+    "$DOCKER" stop "$SYNC_CONTAINER" 2>/dev/null || true
+    "$DOCKER" run --rm \
+        --entrypoint rsync \
+        -v "$CURRENT_DIR:/host-workspace" \
+        -v "$VOLUME_NAME:/workspace:ro" \
+        claude-docker:latest \
+        -a --delete $RSYNC_EXCLUDES /workspace/ /host-workspace/ 2>/dev/null || true
+    "$DOCKER" volume rm "$VOLUME_NAME" 2>/dev/null || true
+}
+trap '_cleanup' EXIT
+
+# Create named volume for workspace (Claude never sees the host dir)
+"$DOCKER" volume create "$VOLUME_NAME" > /dev/null
+
+# Initial sync: host -> volume (excluding ignored paths)
+echo "Syncing workspace into container..."
+"$DOCKER" run --rm \
+    --entrypoint rsync \
+    -v "$CURRENT_DIR:/host-workspace:ro" \
+    -v "$VOLUME_NAME:/workspace" \
+    claude-docker:latest \
+    -a $RSYNC_EXCLUDES /host-workspace/ /workspace/
+echo "✓ Workspace ready"
+
+# Start sidecar: bidirectional sync loop (host <-> volume)
+SIDECAR_SCRIPT="while true; do
+    sleep ${SYNC_INTERVAL};
+    rsync -a --update $RSYNC_EXCLUDES /host-workspace/ /workspace/;
+    rsync -a --delete $RSYNC_EXCLUDES /workspace/ /host-workspace/;
+done"
+"$DOCKER" run -d \
+    --name "$SYNC_CONTAINER" \
+    --entrypoint bash \
+    -v "$CURRENT_DIR:/host-workspace" \
+    -v "$VOLUME_NAME:/workspace" \
+    claude-docker:latest \
+    -c "$SIDECAR_SCRIPT" > /dev/null
+echo "✓ Sync sidecar started (every ${SYNC_INTERVAL}s)"
+
+# Run Claude Code in Docker (named volume only - host dir not mounted)
 echo "Starting Claude Code in Docker..."
 "$DOCKER" run -it --rm \
     $DOCKER_OPTS \
-    -v "$CURRENT_DIR:/host-workspace:rw" \
+    -v "$VOLUME_NAME:/workspace" \
     -v "$CLAUDE_HOME_DIR:/home/claude-user/.claude:rw" \
     -v "$SSH_DIR:/home/claude-user/.ssh:rw" \
     $MOUNT_ARGS \
     $ENV_ARGS \
     -e CLAUDE_CONTINUE_FLAG="$CONTINUE_FLAG" \
     -e CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS="$SKIP_PERMISSIONS" \
-    -e SYNC_INTERVAL="$SYNC_INTERVAL" \
     --workdir /workspace \
-    --name "claude-docker-$(basename "$CURRENT_DIR")-$$" \
+    --name "$CLAUDE_CONTAINER" \
     claude-docker:latest ${ARGS[@]+"${ARGS[@]}"}

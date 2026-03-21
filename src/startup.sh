@@ -71,42 +71,6 @@ fi
 #     done < <(sed 's://.*$::g' "$HOME/.claude/settings.json" | jq -r '.env // {} | to_entries | .[] | "\(.key)=\(.value)"' 2>/dev/null)
 # fi
 
-# Sync workspace from host, run Claude, and sync back periodically
-IGNORE_FILE="/host-workspace/.claudedockerignore"
-RSYNC_EXCLUDES=""
-if [ -f "$IGNORE_FILE" ]; then
-    RSYNC_EXCLUDES="--exclude-from=$IGNORE_FILE"
-    echo "✓ Using .claudedockerignore for rsync exclusions"
-fi
-
-_sync_to_host() {
-    rsync -a --delete $RSYNC_EXCLUDES /workspace/ /host-workspace/ 2>/dev/null || true
-}
-
-_sync_from_host() {
-    # --update skips files that are newer in the container, avoiding overwriting Claude's recent work
-    rsync -a --update $RSYNC_EXCLUDES /host-workspace/ /workspace/ 2>/dev/null || true
-}
-
-# Initial sync: host -> container (excluding ignored paths)
-echo "Syncing workspace from host..."
-rsync -a $RSYNC_EXCLUDES /host-workspace/ /workspace/ || true
-echo "✓ Workspace ready"
-
-# Background periodic bidirectional sync
-_bg_sync() {
-    while true; do
-        sleep "${SYNC_INTERVAL:-30}"
-        _sync_from_host
-        _sync_to_host
-    done
-}
-_bg_sync &
-SYNC_PID=$!
-
-# Final sync and background process cleanup on exit
-trap '_sync_to_host; kill $SYNC_PID 2>/dev/null' EXIT
-
 # Start Claude Code
 echo "Starting Claude Code..."
 SKIP_PERMISSIONS_FLAG=""
