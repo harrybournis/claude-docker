@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     sudo \
     gettext-base \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # Install additional system packages if specified
@@ -88,8 +89,8 @@ RUN chmod +x /app/install-mcp-servers.sh
 RUN cp /tmp/.claude.json /home/claude-user/.claude.json && \
     rm -f /tmp/.claude.json
 
-# Set proper ownership for everything
-RUN chown -R claude-user /app /home/claude-user
+# Set proper ownership for everything (including /workspace for rsync)
+RUN mkdir -p /workspace && chown -R claude-user /app /home/claude-user /workspace
 
 # Switch to non-root user
 USER claude-user
