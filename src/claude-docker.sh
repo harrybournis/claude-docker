@@ -18,6 +18,7 @@ MEMORY_LIMIT=""
 GPU_ACCESS=""
 CC_VERSION=""
 SYNC_INTERVAL="5"
+SESSION_ID=""
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -58,6 +59,10 @@ while [[ $# -gt 0 ]]; do
             CC_VERSION="$2"
             shift 2
             ;;
+        --session-id)
+            SESSION_ID="$2"
+            shift 2
+            ;;
         *)
             ARGS+=("$1")
             shift
@@ -70,6 +75,13 @@ check_container_runtime "$DOCKER" "1.44"
 
 # Get the absolute path of the current directory
 CURRENT_DIR=$(pwd)
+
+# Derive a stable session UUID from the project path if not explicitly provided
+if [ -z "$SESSION_ID" ]; then
+    _hash=$(echo "$CURRENT_DIR" | md5sum | cut -d' ' -f1)
+    SESSION_ID="${_hash:0:8}-${_hash:8:4}-4${_hash:13:3}-${_hash:17:4}-${_hash:20:12}"
+    unset _hash
+fi
 
 # Claude config dir: use CLAUDE_CONFIG_DIR env var if set, otherwise default to ~/.claude-docker
 CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude-docker}"
@@ -338,6 +350,7 @@ echo "Starting Claude Code in Docker..."
     -v "/etc/machine-id:/etc/machine-id:ro" \
     $MOUNT_ARGS \
     $ENV_ARGS \
+    -e "CLAUDE_SESSION_ID=$SESSION_ID" \
     --workdir /workspace \
     --name "$CLAUDE_CONTAINER" \
     claude-docker:latest ${ARGS[@]+"${ARGS[@]}"}

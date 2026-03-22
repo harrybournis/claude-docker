@@ -32,6 +32,7 @@ fi
 # Start Claude Code
 echo "Starting Claude Code..."
 CLAUDE_ARGS=()
+[ -n "${CLAUDE_SESSION_ID:-}" ] && CLAUDE_ARGS+=("--session-id" "${CLAUDE_SESSION_ID}")
 [ -n "${CLAUDE_CONTINUE_FLAG:-}" ] && CLAUDE_ARGS+=("${CLAUDE_CONTINUE_FLAG}")
 [ "${CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ] && CLAUDE_ARGS+=("--dangerously-skip-permissions")
 
