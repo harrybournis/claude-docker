@@ -32,8 +32,14 @@ fi
 # Start Claude Code
 echo "Starting Claude Code..."
 CLAUDE_ARGS=()
-[ -n "${CLAUDE_SESSION_ID:-}" ] && CLAUDE_ARGS+=("--session-id" "${CLAUDE_SESSION_ID}")
-[ -n "${CLAUDE_CONTINUE_FLAG:-}" ] && CLAUDE_ARGS+=("${CLAUDE_CONTINUE_FLAG}")
+if [ -n "${CLAUDE_CONTINUE_FLAG:-}" ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
+    # Resume the specific session for this project rather than the most recent global one
+    CLAUDE_ARGS+=("--resume" "${CLAUDE_SESSION_ID}")
+elif [ -n "${CLAUDE_CONTINUE_FLAG:-}" ]; then
+    CLAUDE_ARGS+=("${CLAUDE_CONTINUE_FLAG}")
+elif [ -n "${CLAUDE_SESSION_ID:-}" ]; then
+    CLAUDE_ARGS+=("--session-id" "${CLAUDE_SESSION_ID}")
+fi
 [ "${CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ] && CLAUDE_ARGS+=("--dangerously-skip-permissions")
 
 if claude "${CLAUDE_ARGS[@]}" "$@"; then

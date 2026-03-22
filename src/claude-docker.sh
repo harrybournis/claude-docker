@@ -76,11 +76,20 @@ check_container_runtime "$DOCKER" "1.44"
 # Get the absolute path of the current directory
 CURRENT_DIR=$(pwd)
 
-# Derive a stable session UUID from the project path if not explicitly provided
+# Derive a stable session UUID for this project if not explicitly provided.
+# UUID is generated once (v4) and stored so it stays consistent across runs.
 if [ -z "$SESSION_ID" ]; then
-    _hash=$(echo "$CURRENT_DIR" | md5sum | cut -d' ' -f1)
-    SESSION_ID="${_hash:0:8}-${_hash:8:4}-4${_hash:13:3}-${_hash:17:4}-${_hash:20:12}"
-    unset _hash
+    _key=$(echo "$CURRENT_DIR" | md5sum | cut -c1-8)
+    _uuid_dir="${CLAUDE_HOME_DIR}/session-uuids"
+    mkdir -p "$_uuid_dir"
+    _uuid_file="${_uuid_dir}/${_key}.uuid"
+    if [ -f "$_uuid_file" ]; then
+        SESSION_ID=$(cat "$_uuid_file")
+    else
+        SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+        echo "$SESSION_ID" > "$_uuid_file"
+    fi
+    unset _key _uuid_dir _uuid_file
 fi
 
 # Claude config dir: use CLAUDE_CONFIG_DIR env var if set, otherwise default to ~/.claude-docker
