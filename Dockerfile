@@ -32,16 +32,17 @@ else \
     echo "No additional system packages specified"; \
 fi
 
-# Create a non-root user with matching host UID/GID
+# Create a non-root user with matching host UID/GID/username so HOME paths align
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG USER_NAME=claude-user
 RUN if getent group $USER_GID > /dev/null 2>&1; then \
         GROUP_NAME=$(getent group $USER_GID | cut -d: -f1); \
     else \
-        groupadd -g $USER_GID claude-user && GROUP_NAME=claude-user; \
+        groupadd -g $USER_GID $USER_NAME && GROUP_NAME=$USER_NAME; \
     fi && \
-    useradd -m -s /bin/bash -u $USER_UID -g $GROUP_NAME claude-user && \
-    echo "claude-user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    useradd -m -s /bin/bash -u $USER_UID -g $GROUP_NAME $USER_NAME && \
+    echo "$USER_NAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Create app directory
 WORKDIR /app
@@ -60,34 +61,33 @@ RUN if [ -n "$CC_VERSION" ]; then \
 ENV PATH="/usr/local/bin:${PATH}"
 
 # Create directories for configuration
-RUN mkdir -p /app/.claude /home/claude-user/.claude
+RUN mkdir -p /app/.claude /home/${USER_NAME}/.claude
 
 # Copy startup script
 COPY src/startup.sh /app/
 RUN chmod +x /app/startup.sh
 
 # Copy .claude directory for runtime use
-COPY .claude /app/.claude
+# COPY .claude /app/.claude
 
 # Copy MCP server installation script (as root)
 COPY mcp-servers.sh /app/
 RUN chmod +x /app/mcp-servers.sh
 
 # Set proper ownership for everything (including /workspace for rsync)
-RUN mkdir -p /workspace && chown -R claude-user /app /home/claude-user /workspace
+RUN mkdir -p /workspace && chown -R ${USER_NAME} /app /home/${USER_NAME} /workspace
 
 # Switch to non-root user
-USER claude-user
+USER ${USER_NAME}
 
 # Set HOME immediately after switching user
-ENV HOME=/home/claude-user
+ENV HOME=/home/${USER_NAME}
 
-# Install uv (Astral) for claude-user for Serena MCP (todo make this modular.)
-# Note: Will be installed for claude-user after user creation
+# Install uv (Astral) for the user for Serena MCP (todo make this modular.)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Add claude-user's local bin to PATH
-ENV PATH="/home/claude-user/.local/bin:${PATH}"
+# Add user's local bin to PATH
+ENV PATH="/home/${USER_NAME}/.local/bin:${PATH}"
 
 # Install MCP servers from configuration file
 RUN /app/mcp-servers.sh

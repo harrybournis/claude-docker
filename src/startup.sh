@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
-trap 'echo "$0: line $LINENO: $BASH_COMMAND: exitcode $?"' ERR
+set -uo pipefail
 
 # ABOUTME: Startup script for claude-docker container
 # ABOUTME: Checks for .credentials.json, copies CLAUDE.md template if no claude.md in claude-docker/claude-home.
@@ -33,6 +32,22 @@ fi
 # Start Claude Code
 echo "Starting Claude Code..."
 CLAUDE_ARGS=()
-[ -n "${CLAUDE_CONTINUE_FLAG:-}" ] && CLAUDE_ARGS+=("$CLAUDE_CONTINUE_FLAG")
+[ -n "${CLAUDE_CONTINUE_FLAG:-}" ] && CLAUDE_ARGS+=("${CLAUDE_CONTINUE_FLAG}")
 [ "${CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ] && CLAUDE_ARGS+=("--dangerously-skip-permissions")
-exec claude "${CLAUDE_ARGS[@]}" "$@"
+
+if claude "${CLAUDE_ARGS[@]}" "$@"; then
+    exit 0
+fi
+
+# If --continue was passed but no session exists, retry without it
+if [[ " ${CLAUDE_ARGS[*]:-} $* " == *"--continue"* ]]; then
+    echo "No previous session found, starting fresh..."
+    CLAUDE_ARGS=("${CLAUDE_ARGS[@]/--continue}")
+    ARGS_NO_CONTINUE=()
+    for arg in "$@"; do
+        [ "$arg" != "--continue" ] && ARGS_NO_CONTINUE+=("$arg")
+    done
+    exec claude "${CLAUDE_ARGS[@]}" "${ARGS_NO_CONTINUE[@]+"${ARGS_NO_CONTINUE[@]}"}"
+fi
+
+exit 1

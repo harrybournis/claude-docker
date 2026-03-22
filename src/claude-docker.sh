@@ -65,15 +65,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate runtime and resolve persistent host directory before any build/run operations.
+# Validate runtime before any build/run operations.
 check_container_runtime "$DOCKER" "1.44"
-resolve_claude_docker_dir
 
 # Get the absolute path of the current directory
 CURRENT_DIR=$(pwd)
 
-CLAUDE_HOME_DIR="$CLAUDE_DOCKER_DIR/claude-home"
-SSH_DIR="$CLAUDE_DOCKER_DIR/ssh"
+# Claude config dir: use CLAUDE_CONFIG_DIR env var if set, otherwise default to ~/.claude-docker
+CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude-docker}"
+SSH_DIR="${HOME}/.ssh"
+
+mkdir -p "$CLAUDE_HOME_DIR"
 
 # Use environment variables as defaults if command line args not provided
 if [ -z "${MEMORY_LIMIT:-}" ] && [ -n "${DOCKER_MEMORY_LIMIT:-}" ]; then
@@ -107,7 +109,7 @@ fi
 if [ "$NEED_REBUILD" = true ]; then
     BUILD_CMD=("$DOCKER" build)
     [ -n "$NO_CACHE" ] && BUILD_CMD+=("--no-cache")
-    BUILD_CMD+=(--build-arg "USER_UID=$(id -u)" --build-arg "USER_GID=$(id -g)")
+    BUILD_CMD+=(--build-arg "USER_UID=$(id -u)" --build-arg "USER_GID=$(id -g)" --build-arg "USER_NAME=$(whoami)")
     if [ -n "${SYSTEM_PACKAGES:-}" ]; then
         echo "✓ Building with additional system packages: $SYSTEM_PACKAGES"
         BUILD_CMD+=(--build-arg "SYSTEM_PACKAGES=$SYSTEM_PACKAGES")
@@ -120,22 +122,18 @@ if [ "$NEED_REBUILD" = true ]; then
     "${BUILD_CMD[@]}"
 fi
 
-# Ensure the claude-home and ssh directories exist
-mkdir -p "$CLAUDE_HOME_DIR"
-mkdir -p "$SSH_DIR"
-
-# Copy authentication files to persistent claude-home if they don't exist
-if [ -n "${HOME:-}" ] && [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.credentials.json" ]; then
+# Copy authentication files to persistent directory if they don't exist yet (one-time bootstrap)
+if [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.credentials.json" ]; then
     echo "✓ Copying Claude authentication to persistent directory"
     cp "$HOME/.claude/.credentials.json" "$CLAUDE_HOME_DIR/.credentials.json"
 fi
+if [ -f "$HOME/.claude.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.claude.json" ]; then
+    echo "✓ Copying .claude.json to persistent directory"
+    cp "$HOME/.claude.json" "$CLAUDE_HOME_DIR/.claude.json"
+fi
+touch "$CLAUDE_HOME_DIR/.claude.json"
 
-# Log information about persistent Claude home directory
-echo ""
-echo "📁 Claude persistent home directory: $CLAUDE_HOME_DIR/"
-echo "   This directory contains Claude's settings and CLAUDE.md instructions"
-echo "   Modify files here to customize Claude's behavior across all projects"
-echo ""
+echo "✓ Claude persistent directory: $CLAUDE_HOME_DIR"
 
 # Check SSH key setup
 SSH_KEY_PATH="$SSH_DIR/id_rsa"
@@ -334,8 +332,10 @@ echo "Starting Claude Code in Docker..."
 "$DOCKER" run -it --rm \
     $DOCKER_OPTS \
     -v "$VOLUME_NAME:/workspace" \
-    -v "$CLAUDE_HOME_DIR:/home/claude-user/.claude:rw" \
-    -v "$SSH_DIR:/home/claude-user/.ssh:rw" \
+    -v "$CLAUDE_HOME_DIR:$HOME/.claude:rw" \
+    -v "$CLAUDE_HOME_DIR/.claude.json:$HOME/.claude.json:rw" \
+    -v "$SSH_DIR:$HOME/.ssh:rw" \
+    -v "/etc/machine-id:/etc/machine-id:ro" \
     $MOUNT_ARGS \
     $ENV_ARGS \
     --workdir /workspace \
