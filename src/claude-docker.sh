@@ -76,6 +76,12 @@ check_container_runtime "$DOCKER" "1.44"
 # Get the absolute path of the current directory
 CURRENT_DIR=$(pwd)
 
+# Claude config dir: use CLAUDE_CONFIG_DIR env var if set, otherwise default to ~/.claude-docker
+CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude-docker}"
+SSH_DIR="${HOME}/.ssh"
+
+mkdir -p "$CLAUDE_HOME_DIR"
+
 # Derive a stable session UUID for this project if not explicitly provided.
 # UUID is generated once (v4) and stored so it stays consistent across runs.
 if [ -z "$SESSION_ID" ]; then
@@ -86,17 +92,11 @@ if [ -z "$SESSION_ID" ]; then
     if [ -f "$_uuid_file" ]; then
         SESSION_ID=$(cat "$_uuid_file")
     else
-        SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+        SESSION_ID=$(uuidgen)
         echo "$SESSION_ID" > "$_uuid_file"
     fi
     unset _key _uuid_dir _uuid_file
 fi
-
-# Claude config dir: use CLAUDE_CONFIG_DIR env var if set, otherwise default to ~/.claude-docker
-CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude-docker}"
-SSH_DIR="${HOME}/.ssh"
-
-mkdir -p "$CLAUDE_HOME_DIR"
 
 # Use environment variables as defaults if command line args not provided
 if [ -z "${MEMORY_LIMIT:-}" ] && [ -n "${DOCKER_MEMORY_LIMIT:-}" ]; then
@@ -288,10 +288,10 @@ fi
 PROJECT_NAME="$(basename "$CURRENT_DIR")"
 PATH_HASH=$(echo "$CURRENT_DIR" | md5sum | cut -c1-8)
 PROJECT_KEY="${PROJECT_NAME}-${PATH_HASH}"
-SESSION_ID="$PROJECT_KEY-$$"
-VOLUME_NAME="claude-workspace-$SESSION_ID"
-SYNC_CONTAINER="claude-sync-$SESSION_ID"
-CLAUDE_CONTAINER="claude-docker-$SESSION_ID"
+DOCKER_SESSION_ID="$PROJECT_KEY-$$"
+VOLUME_NAME="claude-workspace-$DOCKER_SESSION_ID"
+SYNC_CONTAINER="claude-sync-$DOCKER_SESSION_ID"
+CLAUDE_CONTAINER="claude-docker-$DOCKER_SESSION_ID"
 
 # Clean up any leftover sync containers and volumes from crashed previous sessions
 LEFTOVER_CONTAINERS=$("$DOCKER" ps -aq --filter "name=claude-sync-$PROJECT_KEY" 2>/dev/null)

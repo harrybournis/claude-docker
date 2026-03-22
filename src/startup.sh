@@ -31,30 +31,39 @@ fi
 
 # Start Claude Code
 echo "Starting Claude Code..."
+
+# Separate --continue/-c from other passthrough args.
+# When a session ID is available, --continue becomes --resume <id> so that
+# the session is scoped to this project rather than the most recent global one.
 CLAUDE_ARGS=()
-if [ -n "${CLAUDE_CONTINUE_FLAG:-}" ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
-    # Resume the specific session for this project rather than the most recent global one
+PASSTHROUGH_ARGS=()
+WANTS_CONTINUE=false
+for arg in "$@"; do
+    if [ "$arg" = "--continue" ] || [ "$arg" = "-c" ]; then
+        WANTS_CONTINUE=true
+    else
+        PASSTHROUGH_ARGS+=("$arg")
+    fi
+done
+
+if [ "$WANTS_CONTINUE" = true ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
     CLAUDE_ARGS+=("--resume" "${CLAUDE_SESSION_ID}")
-elif [ -n "${CLAUDE_CONTINUE_FLAG:-}" ]; then
-    CLAUDE_ARGS+=("${CLAUDE_CONTINUE_FLAG}")
+elif [ "$WANTS_CONTINUE" = true ]; then
+    CLAUDE_ARGS+=("--continue")
 elif [ -n "${CLAUDE_SESSION_ID:-}" ]; then
     CLAUDE_ARGS+=("--session-id" "${CLAUDE_SESSION_ID}")
 fi
+
 [ "${CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS:-false}" = "true" ] && CLAUDE_ARGS+=("--dangerously-skip-permissions")
 
-if claude "${CLAUDE_ARGS[@]}" "$@"; then
+if claude "${CLAUDE_ARGS[@]}" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"; then
     exit 0
 fi
 
-# If --continue was passed but no session exists, retry without it
-if [[ " ${CLAUDE_ARGS[*]:-} $* " == *"--continue"* ]]; then
+# If --resume found no session, retry fresh with just the session-id so it gets created
+if [ "$WANTS_CONTINUE" = true ] && [ -n "${CLAUDE_SESSION_ID:-}" ]; then
     echo "No previous session found, starting fresh..."
-    CLAUDE_ARGS=("${CLAUDE_ARGS[@]/--continue}")
-    ARGS_NO_CONTINUE=()
-    for arg in "$@"; do
-        [ "$arg" != "--continue" ] && ARGS_NO_CONTINUE+=("$arg")
-    done
-    exec claude "${CLAUDE_ARGS[@]}" "${ARGS_NO_CONTINUE[@]+"${ARGS_NO_CONTINUE[@]}"}"
+    exec claude "--session-id" "${CLAUDE_SESSION_ID}" "${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"}"
 fi
 
 exit 1
