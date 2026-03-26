@@ -1,14 +1,17 @@
 # ABOUTME: Docker image for Claude Code
 # ABOUTME: Provides autonomous Claude Code environment
 
-FROM node:20.18.1-slim
+FROM node:20-slim
+
+ARG TZ
+ENV TZ="${TZ:-UTC}"
 
 # Remove default node user — we may need its UID for host matching
 RUN deluser node 2>/dev/null || true && \
     delgroup node 2>/dev/null || true
 
 # Install system dependencies (layer changes rarely)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
@@ -18,14 +21,18 @@ RUN apt-get update && apt-get install -y \
     sudo \
     gettext-base \
     rsync \
-    && rm -rf /var/lib/apt/lists/*
+    jq \
+    less \
+    procps \
+    unzip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install optional additional system packages
 ARG SYSTEM_PACKAGES=""
 RUN if [ -n "$SYSTEM_PACKAGES" ]; then \
         apt-get update && \
-        apt-get install -y $SYSTEM_PACKAGES && \
-        rm -rf /var/lib/apt/lists/*; \
+        apt-get install -y --no-install-recommends $SYSTEM_PACKAGES && \
+        apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
 # Create non-root user matching host UID/GID/username so HOME paths align
@@ -40,24 +47,32 @@ RUN if getent group $USER_GID > /dev/null 2>&1; then \
     useradd -m -s /bin/bash -u $USER_UID -g $GROUP_NAME $USER_NAME && \
     echo "$USER_NAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
+# Allow user to install npm packages globally without sudo
+RUN mkdir -p /usr/local/share/npm-global && \
+    chown -R ${USER_NAME} /usr/local/share/npm-global
+
 # Pre-create shared directories with correct ownership
 RUN mkdir -p /workspace /app && \
     chown -R ${USER_NAME} /app /workspace
 
+# Persist bash history across container restarts
+RUN mkdir -p /commandhistory && \
+    touch /commandhistory/.bash_history && \
+    chown -R ${USER_NAME} /commandhistory
+
 # Switch to non-root user for all subsequent steps
 USER ${USER_NAME}
 ENV HOME=/home/${USER_NAME}
-ENV PATH="/home/${USER_NAME}/.local/bin:${PATH}"
+ENV PATH="/home/${USER_NAME}/.local/bin:/usr/local/share/npm-global/bin:${PATH}"
+ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
+ENV PROMPT_COMMAND="history -a"
+ENV HISTFILE=/commandhistory/.bash_history
 
 # Install uv (Astral) for Serena MCP
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install MCP servers (layer invalidated when mcp-servers.sh changes)
-COPY --chown=${USER_NAME} mcp-servers.sh /app/mcp-servers.sh
-RUN chmod +x /app/mcp-servers.sh && /app/mcp-servers.sh
-
-# Install Claude Code via native installer (npm install is deprecated)
-# Installs to ~/.local/bin/claude — no Node.js dependency at runtime
+# Install Claude Code via native installer (npm install is deprecated upstream)
+# Native binary bundles its own Node runtime — Node.js here is for MCP servers only
 # Declare ARG late so version changes only bust this layer and below
 ARG CC_VERSION=""
 RUN if [ -n "$CC_VERSION" ]; then \
@@ -68,6 +83,10 @@ RUN if [ -n "$CC_VERSION" ]; then \
 
 # Disable auto-updater — image is immutable, updates happen via rebuild
 ENV DISABLE_AUTOUPDATER=1
+
+# Install MCP servers after Claude Code — mcp-servers.sh uses the claude command
+COPY --chown=${USER_NAME} mcp-servers.sh /app/mcp-servers.sh
+RUN chmod +x /app/mcp-servers.sh && /app/mcp-servers.sh
 
 # Copy startup script last — most likely to change during development
 COPY --chown=${USER_NAME} src/startup.sh /app/startup.sh
