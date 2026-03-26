@@ -80,7 +80,8 @@ CURRENT_DIR=$(pwd)
 CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude-docker}"
 SSH_DIR="${HOME}/.ssh"
 
-mkdir -p "$CLAUDE_HOME_DIR"
+CLAUDE_CONFIG_DIR="$CLAUDE_HOME_DIR/claude-home"
+mkdir -p "$CLAUDE_HOME_DIR" "$CLAUDE_CONFIG_DIR"
 
 # Derive a stable session UUID for this project if not explicitly provided.
 # UUID is generated once (v4) and stored so it stays consistent across runs.
@@ -144,9 +145,9 @@ if [ "$NEED_REBUILD" = true ]; then
 fi
 
 # Copy authentication files to persistent directory if they don't exist yet (one-time bootstrap)
-if [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.credentials.json" ]; then
+if [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then
     echo "✓ Copying Claude authentication to persistent directory"
-    cp "$HOME/.claude/.credentials.json" "$CLAUDE_HOME_DIR/.credentials.json"
+    cp "$HOME/.claude/.credentials.json" "$CLAUDE_CONFIG_DIR/.credentials.json"
 fi
 if [ -f "$HOME/.claude.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.claude.json" ]; then
     echo "✓ Copying .claude.json to persistent directory"
@@ -353,7 +354,7 @@ echo "Starting Claude Code in Docker..."
 "$DOCKER" run -it --rm \
     $DOCKER_OPTS \
     -v "$VOLUME_NAME:/workspace" \
-    -v "$CLAUDE_HOME_DIR:$HOME/.claude:rw" \
+    -v "$CLAUDE_CONFIG_DIR:$HOME/.claude:rw" \
     -v "$CLAUDE_HOME_DIR/.claude.json:$HOME/.claude.json:rw" \
     -v "$SSH_DIR:$HOME/.ssh:rw" \
     -v "/etc/machine-id:/etc/machine-id:ro" \

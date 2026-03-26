@@ -77,15 +77,9 @@ TARGET_SHELL="$(get_user_shell_from_passwd "$TARGET_USER")"
 TARGET_RC_NAME="$(get_shell_rc_filename "$TARGET_SHELL")"
 TARGET_RC_FILE="$TARGET_HOME/$TARGET_RC_NAME"
 
-resolve_claude_docker_dir "$TARGET_HOME"
-CLAUDE_HOME_DIR="$CLAUDE_DOCKER_DIR/claude-home"
-
-# Create claude persistence directory
-mkdir -p "$CLAUDE_HOME_DIR"
-
-# Copy template .claude contents to persistent directory
-echo "✓ Copying template Claude configuration to persistent directory"
-cp -r "$PROJECT_ROOT/.claude/." "$CLAUDE_HOME_DIR/"
+# Create persistent directories
+CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${TARGET_HOME}/.claude-docker}"
+mkdir -p "$CLAUDE_HOME_DIR/claude-home" "$CLAUDE_HOME_DIR/session-uuids"
 
 # Add alias to the detected shell RC file
 ALIAS_LINE="alias claude-docker='$PROJECT_ROOT/src/claude-docker.sh'"
