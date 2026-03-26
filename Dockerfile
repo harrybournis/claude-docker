@@ -3,12 +3,11 @@
 
 FROM node:20.18.1-slim
 
-# delete default node user if exists
-# we will likely need his UID
-RUN deluser node || true
-RUN delgroup node || true
+# Remove default node user — we may need its UID for host matching
+RUN deluser node 2>/dev/null || true && \
+    delgroup node 2>/dev/null || true
 
-# Install Node.js and required system dependencies
+# Install system dependencies (layer changes rarely)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -21,18 +20,15 @@ RUN apt-get update && apt-get install -y \
     rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# Install additional system packages if specified
+# Install optional additional system packages
 ARG SYSTEM_PACKAGES=""
 RUN if [ -n "$SYSTEM_PACKAGES" ]; then \
-    echo "Installing additional system packages: $SYSTEM_PACKAGES" && \
-    apt-get update && \
-    apt-get install -y $SYSTEM_PACKAGES && \
-    rm -rf /var/lib/apt/lists/*; \
-else \
-    echo "No additional system packages specified"; \
-fi
+        apt-get update && \
+        apt-get install -y $SYSTEM_PACKAGES && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
 
-# Create a non-root user with matching host UID/GID/username so HOME paths align
+# Create non-root user matching host UID/GID/username so HOME paths align
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG USER_NAME=claude-user
@@ -44,59 +40,39 @@ RUN if getent group $USER_GID > /dev/null 2>&1; then \
     useradd -m -s /bin/bash -u $USER_UID -g $GROUP_NAME $USER_NAME && \
     echo "$USER_NAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Create app directory
-WORKDIR /app
+# Pre-create shared directories with correct ownership
+RUN mkdir -p /workspace /app && \
+    chown -R ${USER_NAME} /app /workspace
 
-# Install Claude Code globally (optionally a specific version)
-ARG CC_VERSION=""
-RUN if [ -n "$CC_VERSION" ]; then \
-        echo "Installing Claude Code version: $CC_VERSION" && \
-        npm install -g @anthropic-ai/claude-code@$CC_VERSION; \
-    else \
-        echo "Installing latest Claude Code" && \
-        npm install -g @anthropic-ai/claude-code; \
-    fi
-
-# Ensure npm global bin is in PATH
-ENV PATH="/usr/local/bin:${PATH}"
-
-# Create directories for configuration
-RUN mkdir -p /app/.claude /home/${USER_NAME}/.claude
-
-# Copy startup script
-COPY src/startup.sh /app/
-RUN chmod +x /app/startup.sh
-
-# Copy .claude directory for runtime use
-# COPY .claude /app/.claude
-
-# Copy MCP server installation script (as root)
-COPY mcp-servers.sh /app/
-RUN chmod +x /app/mcp-servers.sh
-
-# Set proper ownership for everything (including /workspace for rsync)
-RUN mkdir -p /workspace && chown -R ${USER_NAME} /app /home/${USER_NAME} /workspace
-
-# Switch to non-root user
+# Switch to non-root user for all subsequent steps
 USER ${USER_NAME}
-
-# Set HOME immediately after switching user
 ENV HOME=/home/${USER_NAME}
-
-# Install uv (Astral) for the user for Serena MCP (todo make this modular.)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Add user's local bin to PATH
 ENV PATH="/home/${USER_NAME}/.local/bin:${PATH}"
 
-# Install MCP servers from configuration file
-RUN /app/mcp-servers.sh
+# Install uv (Astral) for Serena MCP
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Set working directory to mounted volume
+# Install MCP servers (layer invalidated when mcp-servers.sh changes)
+COPY --chown=${USER_NAME} mcp-servers.sh /app/mcp-servers.sh
+RUN chmod +x /app/mcp-servers.sh && /app/mcp-servers.sh
+
+# Install Claude Code via native installer (npm install is deprecated)
+# Installs to ~/.local/bin/claude — no Node.js dependency at runtime
+# Declare ARG late so version changes only bust this layer and below
+ARG CC_VERSION=""
+RUN if [ -n "$CC_VERSION" ]; then \
+        curl -fsSL https://claude.ai/install.sh | bash -s "$CC_VERSION"; \
+    else \
+        curl -fsSL https://claude.ai/install.sh | bash; \
+    fi
+
+# Disable auto-updater — image is immutable, updates happen via rebuild
+ENV DISABLE_AUTOUPDATER=1
+
+# Copy startup script last — most likely to change during development
+COPY --chown=${USER_NAME} src/startup.sh /app/startup.sh
+RUN chmod +x /app/startup.sh
+
 WORKDIR /workspace
-
-# Environment variables will be passed from host
 ENV NODE_ENV=production
-
-# Start both MCP server and Claude Code
 ENTRYPOINT ["/app/startup.sh"]
