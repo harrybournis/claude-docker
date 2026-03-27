@@ -77,7 +77,7 @@ RUN if [ -n "$CC_VERSION" ]; then \
 ENV DISABLE_AUTOUPDATER=1
 
 # Install MCP servers after Claude Code — mcp-servers.sh uses the claude command
-COPY --chown=claude-user mcp-servers.sh /app/mcp-servers.sh
+COPY --chown=claude-user src/mcp-servers.sh /app/mcp-servers.sh
 RUN chmod +x /app/mcp-servers.sh && /app/mcp-servers.sh
 
 # Copy startup script last — most likely to change during development
