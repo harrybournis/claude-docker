@@ -193,6 +193,7 @@ _cleanup() {
     echo ""
     echo "Performing final sync to host..."
     "$DOCKER" stop "$SYNC_CONTAINER" 2>/dev/null || true
+    "$DOCKER" rm "$SYNC_CONTAINER" 2>/dev/null || true
     "$DOCKER" run --rm \
         --entrypoint rsync \
         -v "$CURRENT_DIR:/host-workspace" \
