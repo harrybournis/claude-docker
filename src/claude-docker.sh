@@ -120,7 +120,6 @@ fi
 if [ "$NEED_REBUILD" = true ]; then
     BUILD_CMD=("$DOCKER" build)
     [ -n "$NO_CACHE" ] && BUILD_CMD+=("--no-cache")
-    BUILD_CMD+=(--build-arg "USER_UID=$(id -u)" --build-arg "USER_GID=$(id -g)" --build-arg "USER_NAME=$(whoami)")
     if [ -n "${SYSTEM_PACKAGES:-}" ]; then
         echo "✓ Building with additional system packages: $SYSTEM_PACKAGES"
         BUILD_CMD+=(--build-arg "SYSTEM_PACKAGES=$SYSTEM_PACKAGES")
@@ -237,8 +236,8 @@ echo "Starting Claude Code in Docker..."
 "$DOCKER" run -it --rm \
     $DOCKER_OPTS \
     -v "$VOLUME_NAME:/workspace" \
-    -v "$CLAUDE_CONFIG_DIR:$HOME/.claude:rw" \
-    -v "$CLAUDE_HOME_DIR/.claude.json:$HOME/.claude.json:rw" \
+    -v "$CLAUDE_CONFIG_DIR:/home/claude-user/.claude:rw" \
+    -v "$CLAUDE_HOME_DIR/.claude.json:/home/claude-user/.claude.json:rw" \
     -v "/etc/machine-id:/etc/machine-id:ro" \
     -e "CLAUDE_SESSION_ID=$SESSION_ID" \
     --workdir /workspace \

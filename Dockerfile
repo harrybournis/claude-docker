@@ -6,7 +6,7 @@ FROM node:20-slim
 ARG TZ
 ENV TZ="${TZ:-UTC}"
 
-# Remove default node user — we may need its UID for host matching
+# Remove default node user to avoid UID conflicts
 RUN deluser node 2>/dev/null || true && \
     delgroup node 2>/dev/null || true
 
@@ -35,35 +35,27 @@ RUN if [ -n "$SYSTEM_PACKAGES" ]; then \
         apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
-# Create non-root user matching host UID/GID/username so HOME paths align
-ARG USER_UID=1000
-ARG USER_GID=1000
-ARG USER_NAME=claude-user
-RUN if getent group $USER_GID > /dev/null 2>&1; then \
-        GROUP_NAME=$(getent group $USER_GID | cut -d: -f1); \
-    else \
-        groupadd -g $USER_GID $USER_NAME && GROUP_NAME=$USER_NAME; \
-    fi && \
-    useradd -m -s /bin/bash -u $USER_UID -g $GROUP_NAME $USER_NAME && \
-    echo "$USER_NAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Create non-root user (fixed name — no host matching needed)
+RUN useradd -m -s /bin/bash claude-user && \
+    echo "claude-user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Allow user to install npm packages globally without sudo
 RUN mkdir -p /usr/local/share/npm-global && \
-    chown -R ${USER_NAME} /usr/local/share/npm-global
+    chown -R claude-user /usr/local/share/npm-global
 
 # Pre-create shared directories with correct ownership
 RUN mkdir -p /workspace /app && \
-    chown -R ${USER_NAME} /app /workspace
+    chown -R claude-user /app /workspace
 
 # Persist bash history across container restarts
 RUN mkdir -p /commandhistory && \
     touch /commandhistory/.bash_history && \
-    chown -R ${USER_NAME} /commandhistory
+    chown -R claude-user /commandhistory
 
 # Switch to non-root user for all subsequent steps
-USER ${USER_NAME}
-ENV HOME=/home/${USER_NAME}
-ENV PATH="/home/${USER_NAME}/.local/bin:/usr/local/share/npm-global/bin:${PATH}"
+USER claude-user
+ENV HOME=/home/claude-user
+ENV PATH="/home/claude-user/.local/bin:/usr/local/share/npm-global/bin:${PATH}"
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PROMPT_COMMAND="history -a"
 ENV HISTFILE=/commandhistory/.bash_history
@@ -85,11 +77,11 @@ RUN if [ -n "$CC_VERSION" ]; then \
 ENV DISABLE_AUTOUPDATER=1
 
 # Install MCP servers after Claude Code — mcp-servers.sh uses the claude command
-COPY --chown=${USER_NAME} mcp-servers.sh /app/mcp-servers.sh
+COPY --chown=claude-user mcp-servers.sh /app/mcp-servers.sh
 RUN chmod +x /app/mcp-servers.sh && /app/mcp-servers.sh
 
 # Copy startup script last — most likely to change during development
-COPY --chown=${USER_NAME} src/startup.sh /app/startup.sh
+COPY --chown=claude-user src/startup.sh /app/startup.sh
 RUN chmod +x /app/startup.sh
 
 WORKDIR /workspace
