@@ -77,6 +77,24 @@ CLAUDE_HOME_DIR="${CLAUDE_CONFIG_DIR:-${HOME}/.claude-docker}"
 CLAUDE_CONFIG_DIR="$CLAUDE_HOME_DIR/claude-home"
 mkdir -p "$CLAUDE_HOME_DIR" "$CLAUDE_CONFIG_DIR"
 
+# Copy authentication files to persistent directory if they don't exist yet (one-time bootstrap)
+if [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then
+    echo "✓ Copying Claude authentication to persistent directory"
+    cp "$HOME/.claude/.credentials.json" "$CLAUDE_CONFIG_DIR/.credentials.json"
+fi
+if [ -f "$HOME/.claude.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.claude.json" ]; then
+    echo "✓ Copying .claude.json to persistent directory"
+    cp "$HOME/.claude.json" "$CLAUDE_HOME_DIR/.claude.json"
+fi
+touch "$CLAUDE_HOME_DIR/.claude.json"
+
+# Bootstrap settings.json from the repo if none exists in the persistent directory yet
+if [ ! -f "$CLAUDE_CONFIG_DIR/settings.json" ] && [ -f "$PROJECT_ROOT/settings.json" ]; then
+    echo "✓ Copying settings.json to persistent directory"
+    cp "$PROJECT_ROOT/settings.json" "$CLAUDE_CONFIG_DIR/settings.json"
+fi
+
+
 # Derive a stable session UUID for this project if not explicitly provided.
 # UUID is generated once (v4) and stored so it stays consistent across runs.
 if [ -z "$SESSION_ID" ]; then
@@ -131,17 +149,6 @@ if [ "$NEED_REBUILD" = true ]; then
     BUILD_CMD+=(-t claude-docker:latest "$PROJECT_ROOT")
     "${BUILD_CMD[@]}"
 fi
-
-# Copy authentication files to persistent directory if they don't exist yet (one-time bootstrap)
-if [ -f "$HOME/.claude/.credentials.json" ] && [ ! -f "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then
-    echo "✓ Copying Claude authentication to persistent directory"
-    cp "$HOME/.claude/.credentials.json" "$CLAUDE_CONFIG_DIR/.credentials.json"
-fi
-if [ -f "$HOME/.claude.json" ] && [ ! -f "$CLAUDE_HOME_DIR/.claude.json" ]; then
-    echo "✓ Copying .claude.json to persistent directory"
-    cp "$HOME/.claude.json" "$CLAUDE_HOME_DIR/.claude.json"
-fi
-touch "$CLAUDE_HOME_DIR/.claude.json"
 
 echo "✓ Claude persistent directory: $CLAUDE_HOME_DIR"
 

@@ -29,6 +29,22 @@ else
     echo "  To reset to template, delete this file and restart"
 fi
 
+# Run MCP server setup once — skipped on subsequent starts via flag file.
+# Runs here (not at build time) because commands require auth and write to the
+# mounted ~/.claude directory which doesn't exist during docker build.
+MCP_SETUP_FLAG="$HOME/.claude/.mcp-setup-done"
+if [ ! -f "$MCP_SETUP_FLAG" ]; then
+    echo "Running MCP server setup..."
+    if /app/mcp-servers.sh; then
+        touch "$MCP_SETUP_FLAG"
+        echo "✓ MCP server setup complete"
+    else
+        echo "⚠️  MCP server setup failed — will retry on next start"
+    fi
+else
+    echo "✓ MCP servers already configured"
+fi
+
 # Start Claude Code
 echo "Starting Claude Code..."
 

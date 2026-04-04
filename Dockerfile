@@ -25,7 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     less \
     procps \
     unzip \
+    ruby-full \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install ruby-lsp gem system-wide so the LSP binary is on PATH
+RUN gem install ruby-lsp
 
 # Install optional additional system packages
 ARG SYSTEM_PACKAGES=""
@@ -76,9 +80,10 @@ RUN if [ -n "$CC_VERSION" ]; then \
 # Disable auto-updater — image is immutable, updates happen via rebuild
 ENV DISABLE_AUTOUPDATER=1
 
-# Install MCP servers after Claude Code — mcp-servers.sh uses the claude command
+# Copy MCP server script — executed at first container start, not at build time,
+# because claude commands require auth and write to the mounted ~/.claude directory
 COPY --chown=claude-user src/mcp-servers.sh /app/mcp-servers.sh
-RUN chmod +x /app/mcp-servers.sh && /app/mcp-servers.sh
+RUN chmod +x /app/mcp-servers.sh
 
 # Copy startup script last — most likely to change during development
 COPY --chown=claude-user src/startup.sh /app/startup.sh
